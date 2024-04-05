@@ -8,3 +8,6 @@ Can you find the easteregg?
 
 [![asciicast](https://asciinema.org/a/sw89gLC2SpRR6BuYtrSjUTPiF.svg)](https://asciinema.org/a/sw89gLC2SpRR6BuYtrSjUTPiF)
 
+
+**Update**: Ported to work on *Ubuntu*.
+
